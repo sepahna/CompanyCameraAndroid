@@ -40,15 +40,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
@@ -688,8 +694,48 @@ private fun CompanyCameraApp(
             }
         }
 
-        selectedPhoto?.let { photo ->
-            PhotoPreviewDialog(photo = photo, onDismiss = { selectedPhoto = null })
+        val selectedPhotoId = selectedPhoto?.id ?: -1L
+        val comments by vm.comments(selectedPhotoId)
+            .collectAsStateWithLifecycle(emptyList())
+
+        selectedPhoto?.let { selected ->
+            val livePhoto = photos.firstOrNull { it.id == selected.id } ?: selected
+            PhotoDetailSheet(
+                photo = livePhoto,
+                comments = comments,
+                onDismiss = { selectedPhoto = null },
+                onAddComment = { text -> vm.addComment(livePhoto.id, text) },
+                onDeleteComment = { id -> vm.deleteComment(id) },
+                onSaveEdit = { updated ->
+                    vm.update(updated)
+                    selectedPhoto = updated
+                    Toast.makeText(context, "تغییرات ذخیره شد.", Toast.LENGTH_SHORT).show()
+                },
+                onDelete = {
+                    vm.delete(livePhoto)
+                    selectedPhoto = null
+                    Toast.makeText(context, "عکس حذف شد.", Toast.LENGTH_SHORT).show()
+                },
+                onShare = {
+                    try {
+                        MediaActions.shareImage(context, livePhoto)
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            context,
+                            e.localizedMessage ?: "اشتراک‌گذاری ناموفق",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                },
+                onSaveGallery = {
+                    val ok = MediaActions.saveToGallery(context, livePhoto)
+                    Toast.makeText(
+                        context,
+                        if (ok) "در گالری ذخیره شد." else "ذخیره در گالری ناموفق بود.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            )
         }
 
         if (showUpdateDialog && updateInfo != null) {
@@ -1159,13 +1205,48 @@ private fun BackupCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PhotoPreviewDialog(photo: Photo, onDismiss: () -> Unit) {
+private fun PhotoDetailSheet(
+    photo: Photo,
+    comments: List<PhotoComment>,
+    onDismiss: () -> Unit,
+    onAddComment: (String) -> Unit,
+    onDeleteComment: (Long) -> Unit,
+    onSaveEdit: (Photo) -> Unit,
+    onDelete: () -> Unit,
+    onShare: () -> Unit,
+    onSaveGallery: () -> Unit
+) {
+    var editing by remember(photo.id) { mutableStateOf(false) }
+    var editName by remember(photo.id) { mutableStateOf(photo.fileName.removeSuffix(".jpg").removeSuffix(".JPG")) }
+    var editDescription by remember(photo.id) { mutableStateOf(photo.description) }
+    var editCategory by remember(photo.id) { mutableStateOf(photo.project) }
+    var commentText by remember(photo.id) { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val date = remember(photo.createdAt) {
+        SimpleDateFormat("yyyy/MM/dd HH:mm", Locale("fa", "IR")).format(Date(photo.createdAt))
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(photo.fileName) },
+        modifier = Modifier.fillMaxWidth(),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(photo.fileName, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "بستن")
+                }
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 val imageFile = remember(photo.relativePath) { File(photo.relativePath) }
                 if (imageFile.exists()) {
                     AsyncImage(
@@ -1173,17 +1254,154 @@ private fun PhotoPreviewDialog(photo: Photo, onDismiss: () -> Unit) {
                         contentDescription = photo.fileName,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 420.dp)
+                            .heightIn(max = 260.dp)
                     )
                 } else {
                     Text("فایل تصویر در مسیر ذخیره‌شده پیدا نشد.")
                 }
-                Text(categoryLabel(photo.project), color = Color.Gray)
-                if (photo.description.isNotBlank()) Text(photo.description)
+
+                Text("${categoryLabel(photo.project)} · $date", color = Color.Gray, style = MaterialTheme.typography.labelMedium)
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(onClick = onShare) {
+                        Icon(Icons.Default.Share, contentDescription = "اشتراک‌گذاری", tint = Blue)
+                    }
+                    IconButton(onClick = onSaveGallery) {
+                        Icon(Icons.Default.SaveAlt, contentDescription = "ذخیره در گالری", tint = Blue)
+                    }
+                    IconButton(onClick = { editing = !editing }) {
+                        Icon(Icons.Default.Edit, contentDescription = "ویرایش", tint = Blue)
+                    }
+                    IconButton(onClick = { confirmDelete = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "حذف", tint = Color(0xFFDC2626))
+                    }
+                }
+
+                if (editing) {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("نام فایل") },
+                        singleLine = true
+                    )
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        val options = listOf("MACHINERY" to "ماشین‌آلات", "PERSONNEL" to "نفرات")
+                        options.forEachIndexed { index, option ->
+                            SegmentedButton(
+                                selected = editCategory == option.first,
+                                onClick = { editCategory = option.first },
+                                shape = SegmentedButtonDefaults.itemShape(index, options.size)
+                            ) { Text(option.second) }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = editDescription,
+                        onValueChange = { editDescription = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("توضیحات") }
+                    )
+                    Button(
+                        onClick = {
+                            val clean = editName.trim()
+                                .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "-")
+                                .removeSuffix(".jpg")
+                                .removeSuffix(".JPG")
+                            if (clean.isBlank()) return@Button
+                            onSaveEdit(
+                                photo.copy(
+                                    fileName = "$clean.jpg",
+                                    description = editDescription.trim(),
+                                    project = editCategory
+                                )
+                            )
+                            editing = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("ذخیره ویرایش") }
+                } else if (photo.description.isNotBlank()) {
+                    Text(photo.description)
+                }
+
+                Text("کامنت‌ها", fontWeight = FontWeight.Bold)
+                if (comments.isEmpty()) {
+                    Text("هنوز کامنتی ثبت نشده است.", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    comments.forEach { comment ->
+                        val commentDate = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale("fa", "IR"))
+                            .format(Date(comment.createdAt))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF7F9FC)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(comment.text)
+                                    Text(commentDate, color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                                }
+                                IconButton(onClick = { onDeleteComment(comment.id) }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "حذف کامنت",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = commentText,
+                        onValueChange = { commentText = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("نوشتن کامنت...") },
+                        singleLine = true
+                    )
+                    IconButton(
+                        onClick = {
+                            val text = commentText.trim()
+                            if (text.isNotEmpty()) {
+                                onAddComment(text)
+                                commentText = ""
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = "ارسال کامنت", tint = Blue)
+                    }
+                }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("بستن") } }
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("بستن") }
+        }
     )
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("حذف عکس") },
+            text = { Text("این عکس و کامنت‌هایش برای همیشه حذف می‌شوند. ادامه می‌دهید؟") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDelete = false
+                    onDelete()
+                }) { Text("حذف") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("لغو") }
+            }
+        )
+    }
 }
 
 @Composable

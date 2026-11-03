@@ -75,6 +75,8 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -512,9 +514,17 @@ private fun CompanyCameraApp(
     val scope = rememberCoroutineScope()
 
     var selectedTab by remember { mutableStateOf(AppTab.Dashboard) }
+    // History tabs: 0 = نفرات, 1 = ماشین‌آلات
+    var historyCategoryTab by remember { mutableIntStateOf(0) }
     var cameraActive by remember { mutableStateOf(false) }
     var description by remember { mutableStateOf("") }
     var selectedPhoto by remember { mutableStateOf<Photo?>(null) }
+
+    fun openHistory(category: String? = null) {
+        if (category == "MACHINERY") historyCategoryTab = 1
+        else if (category == "PERSONNEL") historyCategoryTab = 0
+        selectedTab = AppTab.History
+    }
 
     var updateInfo by remember { mutableStateOf<AppUpdateInfo?>(null) }
     var showUpdateDialog by remember { mutableStateOf(false) }
@@ -646,7 +656,9 @@ private fun CompanyCameraApp(
                     AppTab.Dashboard -> DashboardScreen(
                         photos = photos,
                         onOpenCamera = { selectedTab = AppTab.Camera },
-                        onOpenHistory = { selectedTab = AppTab.History }
+                        onOpenHistory = { openHistory() },
+                        onOpenPersonnel = { openHistory("PERSONNEL") },
+                        onOpenMachinery = { openHistory("MACHINERY") }
                     )
 
                     AppTab.Camera -> CameraScreen(
@@ -675,6 +687,8 @@ private fun CompanyCameraApp(
                     AppTab.History -> HistoryScreen(
                         photos = photos,
                         query = query,
+                        categoryTab = historyCategoryTab,
+                        onCategoryTabChange = { historyCategoryTab = it },
                         onQueryChange = vm::setQuery,
                         onOpenPhoto = { selectedPhoto = it }
                     )
@@ -787,7 +801,9 @@ private fun CompanyCameraApp(
 private fun DashboardScreen(
     photos: List<Photo>,
     onOpenCamera: () -> Unit,
-    onOpenHistory: () -> Unit
+    onOpenHistory: () -> Unit,
+    onOpenPersonnel: () -> Unit,
+    onOpenMachinery: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -801,19 +817,22 @@ private fun DashboardScreen(
                 label = "کل تصاویر",
                 value = photos.size.toString(),
                 icon = Icons.Default.PhotoLibrary,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = onOpenHistory
             )
             StatCard(
                 label = "ماشین‌آلات",
                 value = photos.count { it.project == "MACHINERY" }.toString(),
                 icon = Icons.Default.Build,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = onOpenMachinery
             )
             StatCard(
                 label = "نفرات",
                 value = photos.count { it.project == "PERSONNEL" }.toString(),
                 icon = Icons.Default.Groups,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onClick = onOpenPersonnel
             )
         }
 
@@ -992,40 +1011,77 @@ private fun CameraScreen(
 private fun HistoryScreen(
     photos: List<Photo>,
     query: String,
+    categoryTab: Int,
+    onCategoryTabChange: (Int) -> Unit,
     onQueryChange: (String) -> Unit,
     onOpenPhoto: (Photo) -> Unit
 ) {
-    val filtered = photos.filter {
-        query.isBlank() || it.fileName.contains(query, ignoreCase = true) ||
+    val searching = query.isNotBlank()
+    val matched = photos.filter {
+        !searching || it.fileName.contains(query, ignoreCase = true) ||
             it.description.contains(query, ignoreCase = true)
     }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        item {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("جست‌وجوی نام یا توضیحات") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true
+    // هنگام جست‌وجو همه دسته‌ها؛ در حالت عادی فقط تب انتخاب‌شده
+    val filtered = if (searching) {
+        matched
+    } else {
+        val selectedCategory = if (categoryTab == 0) "PERSONNEL" else "MACHINERY"
+        matched.filter { it.project == selectedCategory }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        TabRow(
+            selectedTabIndex = categoryTab,
+            containerColor = Color.White
+        ) {
+            Tab(
+                selected = categoryTab == 0,
+                onClick = { onCategoryTabChange(0) },
+                text = {
+                    Text("نفرات (${photos.count { it.project == "PERSONNEL" }})")
+                }
+            )
+            Tab(
+                selected = categoryTab == 1,
+                onClick = { onCategoryTabChange(1) },
+                text = {
+                    Text("ماشین‌آلات (${photos.count { it.project == "MACHINERY" }})")
+                }
             )
         }
-        item {
-            Text(
-                "${filtered.size} مورد",
-                color = Color.Gray,
-                style = MaterialTheme.typography.labelMedium
-            )
-        }
-        if (filtered.isEmpty()) {
-            item { EmptyArchiveCard() }
-        } else {
-            items(filtered, key = { it.id }) { photo ->
-                PhotoArchiveRow(photo = photo, onClick = { onOpenPhoto(photo) })
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("جست‌وجو در همه دسته‌ها...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true
+                )
+            }
+            item {
+                Text(
+                    if (searching) {
+                        "نتایج جست‌وجو در همه دسته‌ها: ${filtered.size} مورد"
+                    } else {
+                        "${filtered.size} مورد در ${if (categoryTab == 0) "نفرات" else "ماشین‌آلات"}"
+                    },
+                    color = Color.Gray,
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            if (filtered.isEmpty()) {
+                item { EmptyArchiveCard() }
+            } else {
+                items(filtered, key = { it.id }) { photo ->
+                    PhotoArchiveRow(photo = photo, onClick = { onOpenPhoto(photo) })
+                }
             }
         }
     }
@@ -1409,10 +1465,11 @@ private fun StatCard(
     label: String,
     value: String,
     icon: ImageVector,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Card(
-        modifier = modifier,
+        modifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier,
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {

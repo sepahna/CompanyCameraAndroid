@@ -4,6 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
 android {
     namespace = "ir.mbarani.companycamera"
     compileSdk = 35
@@ -11,16 +12,63 @@ android {
         applicationId = "ir.mbarani.companycamera"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
     }
-    buildFeatures { viewBinding = false; compose = true }
+    buildFeatures {
+        viewBinding = false
+        compose = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    signingConfigs {
+        create("release") {
+            val storePath = System.getenv("SIGNING_STORE_FILE")
+            val storePass = System.getenv("SIGNING_STORE_PASSWORD")
+            val alias = System.getenv("SIGNING_KEY_ALIAS")
+            val keyPass = System.getenv("SIGNING_KEY_PASSWORD")
+            val localStore = rootProject.file("keystore/company-camera.p12")
+
+            when {
+                !storePath.isNullOrBlank() -> {
+                    storeFile = file(storePath)
+                    storePassword = storePass
+                    keyAlias = alias
+                    keyPassword = keyPass
+                    storeType = "PKCS12"
+                }
+                localStore.exists() -> {
+                    storeFile = localStore
+                    storePassword = storePass ?: "CcCam2026!Secure"
+                    keyAlias = alias ?: "companycamera"
+                    keyPassword = keyPass ?: "CcCam2026!Secure"
+                    storeType = "PKCS12"
+                }
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null) {
+                signingConfig = releaseSigning
+            }
+        }
+        release {
+            isMinifyEnabled = false
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null) {
+                signingConfig = releaseSigning
+            }
+        }
+    }
 }
+
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")

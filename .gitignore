@@ -39,8 +39,11 @@ Thumbs.db
 # Kotlin / kapt
 .kotlin/
 
-# Secrets
+# Secrets / signing
 *.jks
 *.keystore
+*.p12
+keystore/
 .env
 credentials.json
+company-camera.p12
